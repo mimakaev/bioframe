@@ -11,7 +11,7 @@ from .io.resources import fetch_ucsc_mrna
 
 
 
-def split_chromosomes(chromsizes, split_pos, suffixes=('L', 'R')):
+def split_chromosomes(chromsizes, split_pos, suffixes=('L', 'R'), drop_missing=False):
     """
     Split chromosomes into chromosome arms
 
@@ -21,6 +21,8 @@ def split_chromosomes(chromsizes, split_pos, suffixes=('L', 'R')):
         Series mapping chromosomes to lengths in bp
     split_pos : pandas.Series
         Series mapping chromosomes to split locations
+    drop_missing : bool
+        If True, drop chromosomes with missing split positions.
 
     Returns
     -------
@@ -28,22 +30,30 @@ def split_chromosomes(chromsizes, split_pos, suffixes=('L', 'R')):
     Arm names are chromosome names + L/R suffix.
 
     """
-    index = chromsizes.index.intersection(split_pos.index)
+    if drop_missing:
+        index = chromsizes.index.intersection(split_pos.index)
+    else:
+        index = chromsizes.index
+        
     left_arm = pd.DataFrame(index=index)
     left_arm['chrom'] = left_arm.index
     left_arm['start'] = 0
     left_arm['end'] = split_pos
+    left_arm['end'] = left_arm['end'].fillna(0).astype(np.int64)
+    
     left_arm['name'] = left_arm.index + suffixes[0]
     left_arm = left_arm.reset_index(drop=True)
 
     right_arm = pd.DataFrame(index=index)
     right_arm['chrom'] = right_arm.index
     right_arm['start'] = split_pos
+    right_arm['start'] = right_arm['start'].fillna(0).astype(np.int64)
     right_arm['end'] = chromsizes
     right_arm['name'] = right_arm.index + suffixes[1]
     right_arm = right_arm.reset_index(drop=True)
 
     arms = pd.concat([left_arm, right_arm], axis=0)
+    arms = arms[arms.end>arms.start]
     idx = np.lexsort([arms.name, arms.index])
     arms = arms.iloc[idx].reset_index(drop=True)
     return arms
