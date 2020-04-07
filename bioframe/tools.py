@@ -10,6 +10,78 @@ from .io.process import cmd_exists, run, to_dataframe, tsv
 from .io.resources import fetch_ucsc_mrna
 
 
+def assign_binspan(regions, 
+                   bins, 
+                   mode='LCRP', 
+                   drop_unassigned=True):
+    """
+    Find which bins are covered by each region.
+
+    Parameters
+    ----------
+    regions : pandas.DataFrame
+        A BED-like dataframe of region coordinates.
+    regions : pandas.DataFrame
+        A BED-like dataframe of bin coordinates.
+    mode : str
+        The mode of assignment that defines which bins get assigned to regions.
+        Possible values are:
+        'LCRP' - 'left complete, right partial'. The left-most bin must be
+        fully covered by a region, while the right-most bin can be covered
+        only partially.
+    drop_unassigned : bool
+        If True, drop regions that do not cover any bin.
+
+    Returns
+    -------
+    A BED-like DataFrame that contains the original data from regions, plus
+    two extra columns 'bin_start' and 'bin_end'. The coordinates are left-closed,
+    right-open, i.e. [bins_start, bin_end).
+    """
+
+    
+    assert (mode in ['LCRP']), f'Unknown assign mode: {mode}'
+    for col in ['chrom', 'start', 'end']:
+        assert col in regions.columns, f'regions must have a {col} column!'
+    for col in ['chrom', 'start', 'end']:
+        assert col in bins.columns, f'bins must have a {col} column!'
+
+
+    regions = regions.copy()
+    regions['bin_start'] = -1
+    regions['bin_end'] = -1
+    bins_gb = bins.groupby('chrom')
+    
+    for i, reg in regions.iterrows():
+        bins_chrom = bins_gb.get_group(reg['chrom'])
+        
+        bin_start, bin_end = -1, -1
+        if mode == 'LCRP':
+            bin_start = bins_chrom['start'].searchsorted(reg['start'],side='left')
+            
+            # regions starting within the last bin span less than a whole bin
+            if bin_start >= len(bins_chrom['start']):
+                continue    
+            bin_start = bins_chrom.index[bin_start]
+            
+            bin_end = bins_chrom['end'].searchsorted(reg['end'],side='left')
+            bin_end = bins_chrom.index[bin_end]
+
+            # Assign the bin to the region even if the bin is partially covered 
+            # by the right end of the bin.
+            if bins_chrom['end'][bin_end] >= reg['end']:
+                bin_end += 1
+
+        regions.at[i, 'bin_start'] = bin_start
+        regions.at[i, 'bin_end'] = bin_end
+        
+    if drop_unassigned:
+        regions = (regions[(regions['bin_start']>=0) 
+                           & (regions['bin_end']>=0)]
+                   .reset_index(drop=True))
+        
+    return regions
+
 
 def split_chromosomes(chromsizes, split_pos, suffixes=('L', 'R'), drop_missing=False):
     """
